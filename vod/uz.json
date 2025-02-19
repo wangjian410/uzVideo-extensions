@@ -1,7 +1,7 @@
 [
     {
         "name": "xhm",
-        "api": "https://raw.githubusercontent.com/yswag/uzVideo/main/js/spider/changZhang20240614.js",
+        "api": "https://raw.githubusercontent.com/wangjian410/uzVideo-extensions/refs/heads/main/vod/js/xhm.js",
         "instance": "xhm20250219",
         "webSite": "https://xhamster.com",
         "remark": ""
