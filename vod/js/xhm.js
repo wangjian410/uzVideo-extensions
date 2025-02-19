@@ -8,13 +8,12 @@ import {} from '../../core/uzUtils.js';
 class XHamsterAPI extends WebApiBase {
   constructor() {
     super();
-    this.host = 'https://zh.xhamster.com/x-api'; // API 地址
+    this.host = 'https://zh.xhamster.com'; // 主机地址
     this.webSite = 'https://zh.xhamster.com'; // 网站首页
     this.headers = {
       'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'Content-Type': 'application/json',
-      'Accept': '*/*',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
       'Referer': this.webSite,
       'X-Requested-With': 'XMLHttpRequest',
     };
@@ -28,10 +27,11 @@ class XHamsterAPI extends WebApiBase {
     let backData = new RepVideoClassList();
     try {
       let categories = [
-        { type_id: 'straight', type_name: '直男' },
-        { type_id: 'gay', type_name: '同性' },
-        { type_id: 'trans', type_name: '变性' },
-        { type_id: 'amateur', type_name: '素人' },
+        { type_id: '/4k', type_name: '4K' },
+        { type_id: '/categories', type_name: '类别' },
+        { type_id: '/newest', type_name: '最新' },
+        { type_id: '/best', type_name: '最佳' },
+        { type_id: '/pornstars', type_name: '明星' },
       ];
       backData.data = categories;
     } catch (error) {
@@ -41,24 +41,19 @@ class XHamsterAPI extends WebApiBase {
   }
 
   /**
-   * 获取分类视频列表
+   * 获取视频列表
    * @returns {Promise<RepVideoList>}
    */
   async getVideoList(args) {
     let backData = new RepVideoList();
     try {
-      if (!args.type_id) {
-        throw new Error('分类ID为空');
-      }
+      const page = args.page || 1;
+      const tid = args.type_id || '/newest'; // 默认获取最新视频
 
-      let response = await req(this.host, {
-        method: 'POST',
+      let url = `${this.host}${tid}/page/${page}`;
+      let response = await req(url, {
+        method: 'GET',
         headers: this.headers,
-        body: JSON.stringify({
-          category: args.type_id,
-          limit: 20,
-          page: args.page || 1,
-        }),
       });
 
       if (!response || !response.data) {
@@ -66,16 +61,8 @@ class XHamsterAPI extends WebApiBase {
       }
 
       let data = response.data;
-      if (data.videos && Array.isArray(data.videos)) {
-        backData.data = data.videos.map(video => ({
-          vod_id: video.id,
-          vod_name: video.title || '未知标题',
-          vod_pic: video.thumbnail_url || '',
-          vod_remarks: video.duration || '未知时长',
-        }));
-      } else {
-        throw new Error('videos 数据格式错误');
-      }
+      let videos = this.getVideoListFromHTML(data);
+      backData.data = videos;
     } catch (error) {
       backData.error = `获取视频列表失败: ${error.message}`;
     }
@@ -93,26 +80,18 @@ class XHamsterAPI extends WebApiBase {
         throw new Error('视频ID为空');
       }
 
-      let response = await req(this.host, {
-        method: 'POST',
+      let url = `${this.host}/video/${args.vod_id}`;
+      let response = await req(url, {
+        method: 'GET',
         headers: this.headers,
-        body: JSON.stringify({ video_id: args.vod_id }),
       });
 
       if (!response || !response.data) {
-        throw new Error('API 返回数据为空');
+        throw new Error('无法获取视频详情');
       }
 
       let data = response.data;
-      if (data.video) {
-        let video = data.video;
-        backData.vod_id = video.id;
-        backData.vod_name = video.title || '未知视频';
-        backData.vod_pic = video.thumbnail_url || '';
-        backData.vod_content = video.description || '暂无简介';
-      } else {
-        throw new Error('video 数据格式错误');
-      }
+      backData = this.parseVideoDetail(data);
     } catch (error) {
       backData.error = `获取视频详情失败: ${error.message}`;
     }
@@ -130,26 +109,19 @@ class XHamsterAPI extends WebApiBase {
         throw new Error('视频ID为空');
       }
 
-      let videoPageUrl = `https://zh.xhamster.com/videos/${args.vod_id}`;
-
-      let response = await req(videoPageUrl, {
+      let url = `${this.host}/video/${args.vod_id}`;
+      let response = await req(url, {
         method: 'GET',
-        headers: { 'User-Agent': this.headers['User-Agent'], 'Referer': this.webSite },
+        headers: this.headers,
       });
 
       if (!response || !response.data) {
-        throw new Error('无法获取视频详情页 HTML');
+        throw new Error('无法获取视频播放信息');
       }
 
-      let html = response.data;
-      let m3u8Regex = /https:\/\/video\d+\.xhcdn\.com\/key=.*?\.m3u8/;
-      let match = html.match(m3u8Regex);
-
-      if (match && match[0]) {
-        backData.data = match[0];
-      } else {
-        throw new Error('未找到 m3u8 播放地址');
-      }
+      let data = response.data;
+      let playUrl = this.extractPlayUrl(data);
+      backData.data = playUrl;
     } catch (error) {
       backData.error = `获取播放地址失败: ${error.message}`;
     }
@@ -167,66 +139,67 @@ class XHamsterAPI extends WebApiBase {
         throw new Error('搜索关键词为空');
       }
 
-      let searchUrl = `https://zh.xhamster.com/search/${encodeURIComponent(args.searchWord)}/${args.page || 1}`;
-
+      let searchUrl = `${this.host}/search/${encodeURIComponent(args.searchWord)}?page=${args.page || 1}`;
       let response = await req(searchUrl, {
         method: 'GET',
-        headers: { 'User-Agent': this.headers['User-Agent'], 'Referer': this.webSite },
+        headers: this.headers,
       });
 
       if (!response || !response.data) {
         throw new Error('无法获取搜索页面 HTML');
       }
 
-      let html = response.data;
-      let document = parse(html);
-      let videoElements = document.querySelectorAll('div.video-thumb');
-
-      backData.data = Array.from(videoElements).map(element => {
-        let vod_id = element.querySelector('a').attributes['href'].split('/').pop();
-        let vod_name = element.querySelector('a').attributes['title'] || '未知标题';
-        let vod_pic = element.querySelector('img').attributes['src'] || '';
-        let vod_duration = element.querySelector('div.duration')?.text || '未知时长';
-
-        return { vod_id, vod_name, vod_pic, vod_remarks: vod_duration };
-      });
+      let data = response.data;
+      let searchResults = this.getSearchResultsFromHTML(data);
+      backData.data = searchResults;
     } catch (error) {
       backData.error = `搜索失败: ${error.message}`;
     }
     return JSON.stringify(backData);
   }
 
-  ignoreClassName = ['4K', '可爱', '高清视频', '18岁', '虚拟现实视频', '地址'];
+  // 解析视频列表
+  getVideoListFromHTML(html) {
+    let videoElements = parse(html).querySelectorAll('.video-item');
+    return Array.from(videoElements).map(element => {
+      return {
+        vod_id: element.querySelector('a').getAttribute('href').split('/').pop(),
+        vod_name: element.querySelector('img').getAttribute('alt'),
+        vod_pic: element.querySelector('img').getAttribute('src'),
+        vod_remarks: element.querySelector('.duration').textContent,
+      };
+    });
+  }
 
-    combineUrl(url) {
-        if (url === undefined) {
-            return ''
-        }
-        if (url.indexOf(this.webSite) !== -1) {
-            return url
-        }
-        if (url.startsWith('/')) {
-            return this.webSite + url
-        }
-        return this.webSite + '/' + url
-    }
+  // 解析视频详情
+  parseVideoDetail(html) {
+    let document = parse(html);
+    return {
+      vod_name: document.querySelector('h1.title').textContent,
+      vod_pic: document.querySelector('img.thumbnail').getAttribute('src'),
+      vod_remarks: document.querySelector('.duration').textContent,
+      vod_play_url: this.extractPlayUrl(document),
+    };
+  }
 
-    isIgnoreClassName(className) {
-        for (let index = 0; index < this.ignoreClassName.length; index++) {
-            const element = this.ignoreClassName[index]
-            if (className.indexOf(element) !== -1) {
-                return true
-            }
-        }
-        return false
-    }
+  // 提取播放地址
+  extractPlayUrl(html) {
+    let playUrl = document.querySelector('video').getAttribute('src');
+    return playUrl || '';
+  }
 
-    removeTrailingSlash(str) {
-        if (str.endsWith('/')) {
-            return str.slice(0, -1)
-        }
-        return str
-    }
+  // 从搜索结果中提取信息
+  getSearchResultsFromHTML(html) {
+    let videoElements = parse(html).querySelectorAll('.search-result-item');
+    return Array.from(videoElements).map(element => {
+      return {
+        vod_id: element.querySelector('a').getAttribute('href').split('/').pop(),
+        vod_name: element.querySelector('img').getAttribute('alt'),
+        vod_pic: element.querySelector('img').getAttribute('src'),
+        vod_remarks: element.querySelector('.duration').textContent,
+      };
+    });
+  }
 }
 // json 中 instance 的值，这个名称一定要特殊
 var xhm20250219 = new xhm20250219();
