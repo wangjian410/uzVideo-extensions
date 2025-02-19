@@ -22,13 +22,10 @@ class XHamsterAPI extends WebApiBase {
 
   /**
    * 获取分类列表
-   * @param {UZArgs} args
-   * @returns {Promise<RepVideoClassList>}
    */
   async getClassList(args) {
     let backData = new RepVideoClassList();
     try {
-      // xhamster 没有标准的分类 API，可能需要手动填写分类
       let categories = [
         { type_id: 'straight', type_name: '直男' },
         { type_id: 'gay', type_name: '同性' },
@@ -37,57 +34,69 @@ class XHamsterAPI extends WebApiBase {
       ];
       backData.data = categories;
     } catch (error) {
-      backData.error = '获取分类失败';
+      backData.error = `分类列表获取失败: ${error}`;
     }
     return JSON.stringify(backData);
   }
 
   /**
    * 获取分类视频列表
-   * @param {UZArgs} args
-   * @returns {Promise<RepVideoList>}
    */
   async getVideoList(args) {
     let backData = new RepVideoList();
     try {
-      const response = await req(this.host, {
+      if (!args.type_id) {
+        throw new Error('分类ID为空');
+      }
+
+      console.log(`请求视频列表: ${this.host}, 分类ID: ${args.type_id}`);
+
+      let response = await req(this.host, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify({
-          category: args.type_id, // 分类 ID
+          category: args.type_id,
           limit: 20,
           page: args.page || 1,
         }),
       });
 
+      if (!response || !response.data) {
+        throw new Error('API 返回数据为空');
+      }
+
       let data = response.data;
-      if (data && data.videos) {
-        let videos = [];
-        for (let video of data.videos) {
-          let videoDet = new VideoDetail();
-          videoDet.vod_id = video.id;
-          videoDet.vod_name = video.title;
-          videoDet.vod_pic = video.thumbnail_url;
-          videoDet.vod_remarks = video.duration;
-          videos.push(videoDet);
-        }
+      if (data.videos && Array.isArray(data.videos)) {
+        let videos = data.videos.map((video) => ({
+          vod_id: video.id,
+          vod_name: video.title || '未知标题',
+          vod_pic: video.thumbnail_url || '',
+          vod_remarks: video.duration || '未知时长',
+        }));
+
         backData.data = videos;
+      } else {
+        throw new Error('videos 数据格式错误');
       }
     } catch (error) {
-      backData.error = '获取视频列表失败';
+      backData.error = `获取视频列表失败: ${error.message}`;
     }
     return JSON.stringify(backData);
   }
 
   /**
    * 获取视频详情
-   * @param {UZArgs} args
-   * @returns {Promise<RepVideoDetail>}
    */
   async getVideoDetail(args) {
     let backData = new RepVideoDetail();
     try {
-      const response = await req(this.host, {
+      if (!args.vod_id) {
+        throw new Error('视频ID为空');
+      }
+
+      console.log(`请求视频详情: ${this.host}, 视频ID: ${args.vod_id}`);
+
+      let response = await req(this.host, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify({
@@ -95,29 +104,39 @@ class XHamsterAPI extends WebApiBase {
         }),
       });
 
+      if (!response || !response.data) {
+        throw new Error('API 返回数据为空');
+      }
+
       let data = response.data;
-      if (data && data.video) {
+      if (data.video) {
         let video = data.video;
         backData.vod_id = video.id;
-        backData.vod_name = video.title;
-        backData.vod_pic = video.thumbnail_url;
+        backData.vod_name = video.title || '未知视频';
+        backData.vod_pic = video.thumbnail_url || '';
         backData.vod_content = video.description || '暂无简介';
+      } else {
+        throw new Error('video 数据格式错误');
       }
     } catch (error) {
-      backData.error = '获取视频详情失败';
+      backData.error = `获取视频详情失败: ${error.message}`;
     }
     return JSON.stringify(backData);
   }
 
   /**
    * 获取视频播放地址
-   * @param {UZArgs} args
-   * @returns {Promise<RepVideoPlayUrl>}
    */
   async getVideoPlayUrl(args) {
     let backData = new RepVideoPlayUrl();
     try {
-      const response = await req(this.host, {
+      if (!args.vod_id) {
+        throw new Error('视频ID为空');
+      }
+
+      console.log(`请求播放地址: ${this.host}, 视频ID: ${args.vod_id}`);
+
+      let response = await req(this.host, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify({
@@ -125,25 +144,35 @@ class XHamsterAPI extends WebApiBase {
         }),
       });
 
+      if (!response || !response.data) {
+        throw new Error('API 返回数据为空');
+      }
+
       let data = response.data;
-      if (data && data.video) {
+      if (data.video && data.video.play_url) {
         backData.data = data.video.play_url;
+      } else {
+        throw new Error('play_url 数据错误');
       }
     } catch (error) {
-      backData.error = '获取播放地址失败';
+      backData.error = `获取播放地址失败: ${error.message}`;
     }
     return JSON.stringify(backData);
   }
 
   /**
    * 搜索视频
-   * @param {UZArgs} args
-   * @returns {Promise<RepVideoList>}
    */
   async searchVideo(args) {
     let backData = new RepVideoList();
     try {
-      const response = await req(this.host, {
+      if (!args.searchWord) {
+        throw new Error('搜索关键词为空');
+      }
+
+      console.log(`请求搜索: ${this.host}, 关键词: ${args.searchWord}`);
+
+      let response = await req(this.host, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify({
@@ -152,25 +181,27 @@ class XHamsterAPI extends WebApiBase {
         }),
       });
 
+      if (!response || !response.data) {
+        throw new Error('API 返回数据为空');
+      }
+
       let data = response.data;
-      if (data && data.videos) {
-        let videos = [];
-        for (let video of data.videos) {
-          let videoDet = new VideoDetail();
-          videoDet.vod_id = video.id;
-          videoDet.vod_name = video.title;
-          videoDet.vod_pic = video.thumbnail_url;
-          videoDet.vod_remarks = video.duration;
-          videos.push(videoDet);
-        }
+      if (data.videos && Array.isArray(data.videos)) {
+        let videos = data.videos.map((video) => ({
+          vod_id: video.id,
+          vod_name: video.title || '未知标题',
+          vod_pic: video.thumbnail_url || '',
+          vod_remarks: video.duration || '未知时长',
+        }));
+
         backData.data = videos;
+      } else {
+        throw new Error('videos 数据格式错误');
       }
     } catch (error) {
-      backData.error = '搜索失败';
+      backData.error = `搜索失败: ${error.message}`;
     }
     return JSON.stringify(backData);
   }
 }
-
-// json 中 instance 的值，这个名称要唯一
 var xhm20250219 = new xhm20250219();
