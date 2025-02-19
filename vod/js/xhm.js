@@ -254,4 +254,4 @@ async function searchVideo(args) {
     return JSON.stringify(backData);
 }
 // json 中 instance 的值，这个名称一定要特殊
-let xhm20250219 = new xhmClass()();
+var xhm20250219 = new xhmClass()();
