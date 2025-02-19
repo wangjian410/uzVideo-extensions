@@ -8,7 +8,7 @@ import {} from '../../core/uzUtils.js';
 class XHamsterAPI extends WebApiBase {
   constructor() {
     super();
-    this.host = 'https://zh.xhamster.com/x-api'; // API 请求地址
+    this.host = 'https://zh.xhamster.com/x-api'; // API 地址
     this.webSite = 'https://zh.xhamster.com'; // 网站首页
     this.headers = {
       'User-Agent':
@@ -22,6 +22,7 @@ class XHamsterAPI extends WebApiBase {
 
   /**
    * 获取分类列表
+   * @returns {Promise<RepVideoClassList>}
    */
   async getClassList(args) {
     let backData = new RepVideoClassList();
@@ -41,6 +42,7 @@ class XHamsterAPI extends WebApiBase {
 
   /**
    * 获取分类视频列表
+   * @returns {Promise<RepVideoList>}
    */
   async getVideoList(args) {
     let backData = new RepVideoList();
@@ -48,8 +50,6 @@ class XHamsterAPI extends WebApiBase {
       if (!args.type_id) {
         throw new Error('分类ID为空');
       }
-
-      console.log(`请求视频列表: ${this.host}, 分类ID: ${args.type_id}`);
 
       let response = await req(this.host, {
         method: 'POST',
@@ -67,14 +67,12 @@ class XHamsterAPI extends WebApiBase {
 
       let data = response.data;
       if (data.videos && Array.isArray(data.videos)) {
-        let videos = data.videos.map((video) => ({
+        backData.data = data.videos.map(video => ({
           vod_id: video.id,
           vod_name: video.title || '未知标题',
           vod_pic: video.thumbnail_url || '',
           vod_remarks: video.duration || '未知时长',
         }));
-
-        backData.data = videos;
       } else {
         throw new Error('videos 数据格式错误');
       }
@@ -86,6 +84,7 @@ class XHamsterAPI extends WebApiBase {
 
   /**
    * 获取视频详情
+   * @returns {Promise<RepVideoDetail>}
    */
   async getVideoDetail(args) {
     let backData = new RepVideoDetail();
@@ -94,14 +93,10 @@ class XHamsterAPI extends WebApiBase {
         throw new Error('视频ID为空');
       }
 
-      console.log(`请求视频详情: ${this.host}, 视频ID: ${args.vod_id}`);
-
       let response = await req(this.host, {
         method: 'POST',
         headers: this.headers,
-        body: JSON.stringify({
-          video_id: args.vod_id,
-        }),
+        body: JSON.stringify({ video_id: args.vod_id }),
       });
 
       if (!response || !response.data) {
@@ -126,6 +121,7 @@ class XHamsterAPI extends WebApiBase {
 
   /**
    * 获取视频播放地址
+   * @returns {Promise<RepVideoPlayUrl>}
    */
   async getVideoPlayUrl(args) {
     let backData = new RepVideoPlayUrl();
@@ -134,25 +130,25 @@ class XHamsterAPI extends WebApiBase {
         throw new Error('视频ID为空');
       }
 
-      console.log(`请求播放地址: ${this.host}, 视频ID: ${args.vod_id}`);
+      let videoPageUrl = `https://zh.xhamster.com/videos/${args.vod_id}`;
 
-      let response = await req(this.host, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify({
-          video_id: args.vod_id,
-        }),
+      let response = await req(videoPageUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': this.headers['User-Agent'], 'Referer': this.webSite },
       });
 
       if (!response || !response.data) {
-        throw new Error('API 返回数据为空');
+        throw new Error('无法获取视频详情页 HTML');
       }
 
-      let data = response.data;
-      if (data.video && data.video.play_url) {
-        backData.data = data.video.play_url;
+      let html = response.data;
+      let m3u8Regex = /https:\/\/video\d+\.xhcdn\.com\/key=.*?\.m3u8/;
+      let match = html.match(m3u8Regex);
+
+      if (match && match[0]) {
+        backData.data = match[0];
       } else {
-        throw new Error('play_url 数据错误');
+        throw new Error('未找到 m3u8 播放地址');
       }
     } catch (error) {
       backData.error = `获取播放地址失败: ${error.message}`;
@@ -162,6 +158,7 @@ class XHamsterAPI extends WebApiBase {
 
   /**
    * 搜索视频
+   * @returns {Promise<RepVideoList>}
    */
   async searchVideo(args) {
     let backData = new RepVideoList();
@@ -170,38 +167,66 @@ class XHamsterAPI extends WebApiBase {
         throw new Error('搜索关键词为空');
       }
 
-      console.log(`请求搜索: ${this.host}, 关键词: ${args.searchWord}`);
+      let searchUrl = `https://zh.xhamster.com/search/${encodeURIComponent(args.searchWord)}/${args.page || 1}`;
 
-      let response = await req(this.host, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify({
-          keyword: args.searchWord,
-          limit: 20,
-        }),
+      let response = await req(searchUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': this.headers['User-Agent'], 'Referer': this.webSite },
       });
 
       if (!response || !response.data) {
-        throw new Error('API 返回数据为空');
+        throw new Error('无法获取搜索页面 HTML');
       }
 
-      let data = response.data;
-      if (data.videos && Array.isArray(data.videos)) {
-        let videos = data.videos.map((video) => ({
-          vod_id: video.id,
-          vod_name: video.title || '未知标题',
-          vod_pic: video.thumbnail_url || '',
-          vod_remarks: video.duration || '未知时长',
-        }));
+      let html = response.data;
+      let document = parse(html);
+      let videoElements = document.querySelectorAll('div.video-thumb');
 
-        backData.data = videos;
-      } else {
-        throw new Error('videos 数据格式错误');
-      }
+      backData.data = Array.from(videoElements).map(element => {
+        let vod_id = element.querySelector('a').attributes['href'].split('/').pop();
+        let vod_name = element.querySelector('a').attributes['title'] || '未知标题';
+        let vod_pic = element.querySelector('img').attributes['src'] || '';
+        let vod_duration = element.querySelector('div.duration')?.text || '未知时长';
+
+        return { vod_id, vod_name, vod_pic, vod_remarks: vod_duration };
+      });
     } catch (error) {
       backData.error = `搜索失败: ${error.message}`;
     }
     return JSON.stringify(backData);
   }
+
+  ignoreClassName = ['4K', '可爱', '高清视频', '18岁', '虚拟现实视频', '地址'];
+
+    combineUrl(url) {
+        if (url === undefined) {
+            return ''
+        }
+        if (url.indexOf(this.webSite) !== -1) {
+            return url
+        }
+        if (url.startsWith('/')) {
+            return this.webSite + url
+        }
+        return this.webSite + '/' + url
+    }
+
+    isIgnoreClassName(className) {
+        for (let index = 0; index < this.ignoreClassName.length; index++) {
+            const element = this.ignoreClassName[index]
+            if (className.indexOf(element) !== -1) {
+                return true
+            }
+        }
+        return false
+    }
+
+    removeTrailingSlash(str) {
+        if (str.endsWith('/')) {
+            return str.slice(0, -1)
+        }
+        return str
+    }
 }
+// json 中 instance 的值，这个名称一定要特殊
 var xhm20250219 = new xhm20250219();
