@@ -24,6 +24,7 @@ async function getClassList(args) {
     var backData = new RepVideoClassList();
     try {
         const categories = [
+            { type_id: '/', type_name: '首页' },
             { type_id: '/4k', type_name: '4K' },
             { type_id: '/categories/chinese', type_name: '国产' },
             { type_id: '/newest', type_name: '最新' },
@@ -47,7 +48,7 @@ async function getClassList(args) {
 async function getSubclassList(args) {
     var backData = new RepVideoSubclassList();
     try {
-        // 暂无二级分类需求，可根据需要扩展
+        // 暂无二级分类
     } catch (error) {
         backData.error = error.toString();
     }
@@ -63,33 +64,33 @@ async function getVideoList(args) {
     var backData = new RepVideoList();
     try {
         const page = args.page || 1;
-        const tid = args.type_id || '/newest';
-        let url = tid === '/4k' ? `${appConfig.webSite}/4k/${page}` : `${appConfig.webSite}${tid}/${page}`;
+        const tid = args.type_id || '/';
+        let url = tid === '/' ? `${appConfig.webSite}/${page}` : `${appConfig.webSite}${tid}/${page}`;
 
         let response = await req(url, {
             method: 'GET',
             headers: {
                 'User-Agent': getUserAgent(),
-                'Referer': appConfig.webSite
+                'Referer': appConfig.webSite,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Cookie': 'cookie_accept_v2=%7B%22e%22%3A1%2C%22f%22%3A1%2C%22t%22%3A1%2C%22a%22%3A1%7D' // 基本Cookie，避免初次访问限制
             }
         });
 
-        if (!response || !response.content) {
-            throw new Error('无法获取页面数据');
-        }
+        if (!response || !response.content) throw new Error('无法获取页面数据');
 
-        console.log('视频列表URL:', url);
+        console.log('请求URL:', url);
         let $ = parse(response.content);
         let videos = [];
         $('.thumb-list__item').forEach(element => {
             let $elem = $(element);
-            let href = $elem.find('.role-pop').attr('href');
+            let href = $elem.find('a[href*="/videos/"]').attr('href');
             if (href) {
                 videos.push({
                     vod_id: href,
-                    vod_name: $elem.find('.video-thumb-info a').text().trim() || '未知标题',
-                    vod_pic: $elem.find('.role-pop img').attr('src'),
-                    vod_remarks: $elem.find('div[data-role="video-duration"]').text().trim()
+                    vod_name: $elem.find('.video-thumb-info__name').text().trim() || '未知标题',
+                    vod_pic: $elem.find('img').attr('src'),
+                    vod_remarks: $elem.find('.thumb-image-container__duration').text().trim()
                 });
             }
         });
@@ -111,7 +112,7 @@ async function getVideoList(args) {
 async function getSubclassVideoList(args) {
     var backData = new RepVideoList();
     try {
-        // 暂无二级分类，直接返回空列表
+        // 暂无二级分类
     } catch (error) {
         backData.error = error.toString();
     }
@@ -133,7 +134,8 @@ async function getVideoDetail(args) {
             method: 'GET',
             headers: {
                 'User-Agent': getUserAgent(),
-                'Referer': appConfig.webSite
+                'Referer': appConfig.webSite,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
             }
         });
 
@@ -145,7 +147,7 @@ async function getVideoDetail(args) {
 
         backData.vod_name = $('meta[property="og:title"]').attr('content') || '未知标题';
         backData.vod_pic = $('meta[property="og:image"]').attr('content');
-        backData.vod_remarks = $('.rb-new__info').text().trim() || '';
+        backData.vod_remarks = $('.duration').text().trim() || '';
         backData.vod_play_from = 'xHamster';
         backData.vod_play_url = playList.length > 0 ? playList.join('#') : url;
 
@@ -170,7 +172,9 @@ async function getVideoPlayUrl(args) {
             method: 'GET',
             headers: {
                 'User-Agent': getUserAgent(),
-                'Referer': appConfig.webSite
+                'Referer': url,
+                'Origin': appConfig.webSite,
+                'Accept': '*/*'
             },
             connectTimeout: 20000,
             readTimeout: 20000
@@ -180,7 +184,8 @@ async function getVideoPlayUrl(args) {
 
         let $ = parse(response.content);
         let jsData = extractJsData($);
-        let playUrl = extractPlayUrls(jsData)[0]?.split('$')[1] || url;
+        let playUrl = extractPlayUrls(jsData).find(url => url.includes('1080p'))?.split('$')[1];
+        if (!playUrl) playUrl = extractPlayUrls(jsData)[0]?.split('$')[1] || url;
 
         console.log('播放URL:', playUrl);
         backData.data = playUrl;
@@ -206,7 +211,8 @@ async function searchVideo(args) {
             method: 'GET',
             headers: {
                 'User-Agent': getUserAgent(),
-                'Referer': appConfig.webSite
+                'Referer': appConfig.webSite,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
             }
         });
 
@@ -216,13 +222,13 @@ async function searchVideo(args) {
         let videos = [];
         $('.thumb-list__item').forEach(element => {
             let $elem = $(element);
-            let href = $elem.find('.role-pop').attr('href');
+            let href = $elem.find('a[href*="/videos/"]').attr('href');
             if (href) {
                 videos.push({
                     vod_id: href,
-                    vod_name: $elem.find('.video-thumb-info a').text().trim(),
-                    vod_pic: $elem.find('.role-pop img').attr('src'),
-                    vod_remarks: $elem.find('div[data-role="video-duration"]').text().trim()
+                    vod_name: $elem.find('.video-thumb-info__name').text().trim(),
+                    vod_pic: $elem.find('img').attr('src'),
+                    vod_remarks: $elem.find('.thumb-image-container__duration').text().trim()
                 });
             }
         });
@@ -240,7 +246,7 @@ async function searchVideo(args) {
  * @returns {string}
  */
 function getUserAgent() {
-    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36 Edg/133.0.0.0';
 }
 
 /**
