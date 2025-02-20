@@ -175,39 +175,121 @@ async function getVideoDetail(args) {
 }
 
 /**
+ * 获取 User-Agent
+ * @returns {string}
+ */
+function getUserAgent() {
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+}
+
+/**
  * 获取视频的播放地址
  * @param {UZArgs} args
  * @returns {@Promise<JSON.stringify(new RepVideoPlayUrl())>}
  */
 async function getVideoPlayUrl(args) {
-    var backData = new RepVideoPlayUrl()
+    var backData = new RepVideoPlayUrl();
     try {
-        if (!args.vod_id) {
-            throw new Error('视频ID为空');
-        }
+		if (args.url) {
+        const urlParts = args.url.split('/');
+        args.vod_id = urlParts[urlParts.length - 1];
+    }
+        if (!args.vod_id) throw new Error('视频ID为空');
 
-        let url = `https://zh.xhamster.com/videos/${args.vod_id}`;
+        // 打印用于调试的视频 URL
+        console.log('视频 URL:', `${appConfig.webSite}/videos/${args.vod_id}`);
+
+        let url = `${appConfig.webSite}/videos/${args.vod_id}`;
         let response = await req(url, {
             method: 'GET',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-                'Referer': 'https://zh.xhamster.com'
-            }
+            headers: { 'User-Agent': getUserAgent() },
+            connectTimeout: 20000,
+            readTimeout: 20000
         });
 
-        if (!response || !response.data) {
-            throw new Error('无法获取视频播放地址');
-        }
+        // 打印返回的原始数据
+        console.log('返回的数据:', response);
+
+        if (!response || !response.data) throw new Error('无法获取视频数据');
 
         let data = response.data;
-        let playUrl = data.video.play_url;
+        let playUrl = extractPlayUrl(data);
+
+        if (!playUrl) {
+            throw new Error('视频没有找到播放地址');
+        }
 
         backData.data = playUrl;
     } catch (error) {
+        console.error("获取播放地址时发生错误:", error);
         backData.error = error.toString();
     }
     return JSON.stringify(backData);
 }
+
+/**
+ * 提取 m3u8 播放地址
+ */
+function extractPlayUrl(data) {
+    try {
+        // 检查数据是否存在并含有正确的属性
+        if (data && data.video && data.video.play_url) {
+            return data.video.play_url;
+        } else {
+            console.error("无法提取播放地址，数据结构可能发生变化。返回的完整数据为：", data);
+            return null; // 没有播放地址时返回 null
+        }
+    } catch (error) {
+        console.error("提取播放地址时发生错误:", error);
+        return null;
+    }
+}
+
+/**
+ * 获取 User-Agent
+ * @returns {string}
+ */
+function getUserAgent() {
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+}
+
+/**
+ * 调试函数：检查extApp是否已定义
+ */
+function debugExtApp() {
+    try {
+        console.log('extApp:', extApp);
+    } catch (error) {
+        console.error("extApp未定义或无法访问:", error);
+    }
+}
+
+/**
+ * 提取 m3u8 播放地址
+ */
+function extractPlayUrl(data) {
+    try {
+        // 确保数据中有 video 和 play_url 属性
+        if (data && data.video && data.video.play_url) {
+            return data.video.play_url;
+        } else {
+            console.error("无法提取播放地址，数据结构可能发生变化。返回的完整数据为：", data);
+            return null; // 没有播放地址时返回 null
+        }
+    } catch (error) {
+        console.error("提取播放地址时发生错误:", error);
+        return null;
+    }
+}
+
+/**
+ * 获取 User-Agent
+ * @returns {string}
+ */
+function getUserAgent() {
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+}
+
 
 /**
  * 搜索视频
