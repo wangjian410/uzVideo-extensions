@@ -1,6 +1,6 @@
 {
    "name": "13",
-    "api": "http://192.168.50.213:9527/download/13.js",
+    "api": "https://raw.githubusercontent.com/wangjian410/uzVideo-extensions/refs/heads/main/vod/js/13.js",
     "webSite": "https://zh.xhamster.com",
     "remark": "",
     "version": "2",
