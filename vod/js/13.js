@@ -1,18 +1,20 @@
 var rule = {
     title: 'xHamster',
     host: 'https://zh.xhamster.com',
-    url: '/categories/fyclass/fysort/fypage', // 更新分类URL模板
-    searchUrl: '/search/**?page=fypage',
-    searchable: 2,
-    quickSearch: 1,
-    filterable: 0,
+    url: '/categories/fyclass/fysort/fypage', // 分类URL模板
+    searchUrl: '/search/**?page=fypage', // 搜索URL模板
+    searchable: 2, // 支持搜索分页
+    quickSearch: 1, // 支持快速搜索
+    filterable: 0, // 暂不支持筛选
     headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://zh.xhamster.com/' // 添加Referer防反爬
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+        'Referer': 'https://zh.xhamster.com/',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'sec-ch-ua': '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"'
     },
     timeout: 5000,
-    class_name: '热门&最新&推荐',
-    class_url: 'popular&new&trending',
+    class_name: '4K&国产&最新&最佳&频道&类别&明星',
+    class_url: '4k&chinese&new&best&channels&categories&pornstars',
     play_parse: false,
     lazy: '',
     limit: 6,
@@ -25,27 +27,8 @@ var rule = {
     // 主页推荐内容
     home: function(filter) {
         let html = req(rule.host, { headers: rule.headers });
-        print('主页HTML长度: ' + html.length); // 调试：检查HTML是否为空
-        if (!html) return JSON.stringify({ list: [] });
-
         let $ = html(html);
-        let videos = [];
-        $('.thumb-list__item').each(function() { // 更新选择器
-            let $this = $(this);
-            let link = $this.find('a').attr('href');
-            let title = $this.find('.video-thumb-info__name').text().trim();
-            let pic = $this.find('img').attr('src');
-            let remarks = $this.find('.thumb-image-container__duration').text().trim();
-            if (link && title) { // 确保关键字段不为空
-                videos.push({
-                    vod_id: link,
-                    vod_name: title,
-                    vod_pic: pic,
-                    vod_remarks: remarks
-                });
-            }
-        });
-        print('主页找到视频数: ' + videos.length); // 调试：检查视频数量
+        let videos = this.getVideoList($('.thumb-list--sidebar .thumb-list__item'));
         return JSON.stringify({
             class: rule.class_name.split('&').map((name, i) => ({
                 type_id: rule.class_url.split('&')[i],
@@ -59,40 +42,22 @@ var rule = {
     homeVod: function() {
         let html = req(rule.host, { headers: rule.headers });
         let $ = html(html);
-        let videos = [];
-        $('.thumb-list__item').each(function() {
-            let $this = $(this);
-            videos.push({
-                vod_id: $this.find('a').attr('href'),
-                vod_name: $this.find('.video-thumb-info__name').text().trim(),
-                vod_pic: $this.find('img').attr('src'),
-                vod_remarks: $this.find('.thumb-image-container__duration').text().trim()
-            });
-        });
+        let videos = this.getVideoList($('.thumb-list--sidebar .thumb-list__item'));
         return JSON.stringify({ list: videos });
     },
 
     // 分类页面
     category: function(tid, pg, filter, extend) {
         pg = pg || 1;
-        let sort = 'best'; // 默认排序，可根据需要调整
+        let sort = tid === '4k' ? '' : 'best'; // 4K无排序，其他默认best
         let url = rule.host + rule.url.replace('fyclass', tid).replace('fysort', sort).replace('fypage', pg);
+        if (tid === '4k') url = `${rule.host}/4k/${pg}`; // 4K特殊处理
         let html = req(url, { headers: rule.headers });
-        print('分类页URL: ' + url); // 调试
         let $ = html(html);
-        let videos = [];
-        $('.thumb-list__item').each(function() {
-            let $this = $(this);
-            videos.push({
-                vod_id: $this.find('a').attr('href'),
-                vod_name: $this.find('.video-thumb-info__name').text().trim(),
-                vod_pic: $this.find('img').attr('src'),
-                vod_remarks: $this.find('.thumb-image-container__duration').text().trim()
-            });
-        });
+        let videos = this.getVideoList($('.thumb-list--sidebar .thumb-list__item'));
         return JSON.stringify({
             page: parseInt(pg),
-            pagecount: 999, // 待优化
+            pagecount: 999, // 暂无法准确解析总数
             limit: rule.limit,
             total: 999 * rule.limit,
             list: videos
@@ -104,16 +69,41 @@ var rule = {
         let url = rule.host + id;
         let html = req(url, { headers: rule.headers });
         let $ = html(html);
-        let playUrl = $('#player source').attr('src') || $('meta[property="og:video"]').attr('content') || '';
+        let jsData = this.getJsData($); // 提取JSON数据
+        let playList = [];
+        
+        // 解析播放链接
+        try {
+            let sources = jsData['xplayerSettings']['sources'];
+            let hls = sources.get('hls');
+            let standard = sources.get('standard');
+            if (hls) {
+                for (let [format, info] of Object.entries(hls)) {
+                    if (info.url) playList.push(`${format}$${info.url}`);
+                }
+            }
+            if (standard) {
+                for (let [key, value] of Object.entries(standard)) {
+                    if (Array.isArray(value)) {
+                        value.forEach(item => {
+                            let url = item.url || item.fallback;
+                            if (url) playList.push(`${item.label || item.quality}$${url}`);
+                        });
+                    }
+                }
+            }
+        } catch (e) {
+            playList.push(`默认$${url}`); // 失败时直接用详情页URL
+        }
+
         let video = {
             vod_id: id,
-            vod_name: $('h1').text().trim(),
+            vod_name: $('meta[property="og:title"]').attr('content'),
             vod_pic: $('.video-container img').attr('src') || $('meta[property="og:image"]').attr('content'),
             vod_play_from: 'xHamster',
-            vod_play_url: playUrl,
-            vod_remarks: $('.duration').text().trim() || ''
+            vod_play_url: playList.join('#'),
+            vod_remarks: $('.rb-new__info').text().trim() || ''
         };
-        print('播放链接: ' + playUrl); // 调试
         return JSON.stringify({ list: [video] });
     },
 
@@ -131,16 +121,7 @@ var rule = {
         let url = rule.host + rule.searchUrl.replace('**', encodeURIComponent(wd)).replace('fypage', pg);
         let html = req(url, { headers: rule.headers });
         let $ = html(html);
-        let videos = [];
-        $('.thumb-list__item').each(function() {
-            let $this = $(this);
-            videos.push({
-                vod_id: $this.find('a').attr('href'),
-                vod_name: $this.find('.video-thumb-info__name').text().trim(),
-                vod_pic: $this.find('img').attr('src'),
-                vod_remarks: $this.find('.thumb-image-container__duration').text().trim()
-            });
-        });
+        let videos = this.getVideoList($('.thumb-list--sidebar .thumb-list__item'));
         return JSON.stringify({
             page: parseInt(pg),
             pagecount: 999,
@@ -148,5 +129,38 @@ var rule = {
             total: 999 * rule.limit,
             list: videos
         });
+    },
+
+    // 辅助函数：提取视频列表
+    getVideoList: function(elements) {
+        let videos = [];
+        elements.each(function() {
+            let $this = $(this);
+            let id = $this.find('.role-pop').attr('href');
+            let name = $this.find('.video-thumb-info a').text().trim();
+            if (id && name) {
+                videos.push({
+                    vod_id: id,
+                    vod_name: name,
+                    vod_pic: $this.find('.role-pop img').attr('src'),
+                    vod_remarks: $this.find('.role-pop div[data-role="video-duration"]').text().trim()
+                });
+            }
+        });
+        return videos;
+    },
+
+    // 辅助函数：提取脚本中的JSON数据
+    getJsData: function($) {
+        let script = $("script[id='initials-script']").text();
+        try {
+            let jsonStr = script.split('initials=')[1].slice(0, -1);
+            return JSON.parse(jsonStr);
+        } catch (e) {
+            print('解析JSON失败: ' + e);
+            return {};
+        }
     }
 };
+
+Object.assign(this, rule);
