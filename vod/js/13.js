@@ -65,38 +65,95 @@ async function getVideoList(args) {
     try {
         const page = args.page || 1;
         const tid = args.type_id || '/';
-        let url = tid === '/' ? `${appConfig.webSite}/${page}` : `${appConfig.webSite}${tid}/${page}`;
 
-        let response = await req(url, {
-            method: 'GET',
-            headers: {
-                'User-Agent': getUserAgent(),
-                'Referer': appConfig.webSite,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Cookie': 'cookie_accept_v2=%7B%22e%22%3A1%2C%22f%22%3A1%2C%22t%22%3A1%2C%22a%22%3A1%7D' // 基本Cookie，避免初次访问限制
-            }
-        });
+        if (tid === '/') {
+            // 使用API获取主页视频
+            let apiUrl = 'https://bbs.xhamster.com/mlxhl/v2/for-page';
+            let body = {
+                statsUid: "67b6af5f0f7d60.399503336f8", // 固定值，可优化
+                views: [],
+                locationCountry: "sg",
+                orientation: "straight",
+                clientLanguage: "zh",
+                country: "sg",
+                pageType: "mainPage",
+                limit: 50,
+                experiments: {
+                    "63": { "group": "d", "version": 1 },
+                    "2008": { "group": "b", "version": 1 },
+                    "2601": { "group": "a", "version": 21 },
+                    "5000": { "group": "a", "version": 17 },
+                    "5006": { "group": "b", "version": 1 },
+                    "6903": { "group": "a", "version": 16 },
+                    "7013": { "group": "a", "version": 29 },
+                    "8030": { "group": "d", "version": 5 }
+                },
+                site: "desktop",
+                userExtra: { favoriteTags: [] },
+                pageVideos: []
+            };
 
-        if (!response || !response.content) throw new Error('无法获取页面数据');
+            let response = await req(apiUrl, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': getUserAgent(),
+                    'Referer': appConfig.webSite,
+                    'Accept': '*/*',
+                    'Origin': appConfig.webSite
+                },
+                data: { body: JSON.stringify(body) }
+            });
 
-        console.log('请求URL:', url);
-        let $ = parse(response.content);
-        let videos = [];
-        $('.thumb-list__item').forEach(element => {
-            let $elem = $(element);
-            let href = $elem.find('a[href*="/videos/"]').attr('href');
-            if (href) {
+            if (!response || !response.content) throw new Error('无法获取API数据');
+
+            console.log('API请求URL:', apiUrl);
+            let jsonData = JSON.parse(response.content);
+            let videos = [];
+            // 假设API返回的视频列表在jsonData.videos中
+            (jsonData.videos || []).forEach(video => {
                 videos.push({
-                    vod_id: href,
-                    vod_name: $elem.find('.video-thumb-info__name').text().trim() || '未知标题',
-                    vod_pic: $elem.find('img').attr('src'),
-                    vod_remarks: $elem.find('.thumb-image-container__duration').text().trim()
+                    vod_id: video.url || `/videos/${video.id}`,
+                    vod_name: video.title || '未知标题',
+                    vod_pic: video.thumb || '',
+                    vod_remarks: video.duration || ''
                 });
-            }
-        });
+            });
 
-        console.log('找到视频数:', videos.length);
-        backData.data = videos;
+            console.log('找到视频数:', videos.length);
+            backData.data = videos.slice(0, 20); // 限制返回数量
+        } else {
+            // 其他分类使用HTML解析
+            let url = `${appConfig.webSite}${tid}/${page}`;
+            let response = await req(url, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': getUserAgent(),
+                    'Referer': appConfig.webSite,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+                }
+            });
+
+            if (!response || !response.content) throw new Error('无法获取页面数据');
+
+            console.log('请求URL:', url);
+            let $ = parse(response.content);
+            let videos = [];
+            $('.thumb-list__item').forEach(element => {
+                let $elem = $(element);
+                let href = $elem.find('a[href*="/videos/"]').attr('href');
+                if (href) {
+                    videos.push({
+                        vod_id: href,
+                        vod_name: $elem.find('.video-thumb-info__name').text().trim() || '未知标题',
+                        vod_pic: $elem.find('img').attr('src'),
+                        vod_remarks: $elem.find('.thumb-image-container__duration').text().trim()
+                    });
+                }
+            });
+
+            console.log('找到视频数:', videos.length);
+            backData.data = videos;
+        }
     } catch (error) {
         backData.error = error.toString();
         console.error('getVideoList错误:', error);
@@ -186,6 +243,11 @@ async function getVideoPlayUrl(args) {
         let jsData = extractJsData($);
         let playUrl = extractPlayUrls(jsData).find(url => url.includes('1080p'))?.split('$')[1];
         if (!playUrl) playUrl = extractPlayUrls(jsData)[0]?.split('$')[1] || url;
+
+        // 确保返回的是.m3u8地址
+        if (playUrl && !playUrl.endsWith('.m3u8')) {
+            playUrl = playUrl.replace(/\/init-v1-a1\.mp4$/, '.m3u8');
+        }
 
         console.log('播放URL:', playUrl);
         backData.data = playUrl;
@@ -278,13 +340,13 @@ function extractPlayUrls(jsData) {
         let standard = sources.standard || {};
 
         for (let [format, info] of Object.entries(hls)) {
-            if (info.url) playList.push(`${format}$${info.url}`);
+            if (info.url && info.url.includes('.m3u8')) playList.push(`${format}$${info.url}`);
         }
         for (let [key, value] of Object.entries(standard)) {
             if (Array.isArray(value)) {
                 value.forEach(item => {
                     let url = item.url || item.fallback;
-                    if (url) playList.push(`${item.label || item.quality}$${url}`);
+                    if (url && url.includes('.m3u8')) playList.push(`${item.label || item.quality}$${url}`);
                 });
             }
         }
